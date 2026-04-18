@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "osukit"
+version = "1.0.0"
+description = "Bot-first osu! toolkit for Python with replay analysis, performance calculation, and advanced score insights"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [{ name = "Error44" }]
+license = { text = "MIT" }
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "License :: OSI Approved :: MIT License",
+  "Topic :: Games/Entertainment",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["osukit*"]
+
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["osukit"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
