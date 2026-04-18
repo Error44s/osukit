@@ -44,10 +44,6 @@ except Exception: # pragma: no cover - optional dependency
 
 @dataclass
 class OsuApiClient:
-    def _user_query(self, user):
-        if isinstance(user, str) and not user.isdigit():
-            return {'key': 'username'}
-        return {}
     token: str | None = None
     base_url: str = 'https://osu.ppy.sh/api/v2'
     timeout: int = 15
@@ -114,6 +110,11 @@ class OsuApiClient:
         if clean_query:
             url += '?' + urlencode(clean_query)
         return url
+
+    def _user_query(self, user: str | int) -> Dict[str, Any]:
+        if isinstance(user, str) and not user.isdigit():
+            return {"key": "username"}
+        return {}
 
     def _handle_http_error(self, exc: HTTPError, path: str):
         retry_after = exc.headers.get('Retry-After') if exc.headers else None
@@ -203,10 +204,16 @@ class OsuApiClient:
         raise OsuApiError(f'osu! API request failed for {path}: unknown error')
 
     def get_user(self, user: str | int, mode: Optional[str] = None) -> Dict[str, Any]:
-        return self._get(f'users/{user}/{mode}' if mode else f'users/{user}')
+        return self._get(
+            f'users/{user}/{mode}' if mode else f'users/{user}',
+            **self._user_query(user),
+        )
 
     async def aget_user(self, user: str | int, mode: Optional[str] = None) -> Dict[str, Any]:
-        return await self._aget(f'users/{user}/{mode}' if mode else f'users/{user}', **self._user_query(user_id))
+        return await self._aget(
+            f'users/{user}/{mode}' if mode else f'users/{user}',
+            **self._user_query(user),
+        )
 
     def get_user_scores(self, user_id: int | str, score_type: str, *, mode: str = 'osu', include_fails: Optional[bool] = None, limit: int = 5, offset: Optional[int] = None) -> Dict[str, Any] | list[Any]:
         return self._get(
@@ -215,6 +222,7 @@ class OsuApiClient:
             include_fails=1 if include_fails else (0 if include_fails is not None else None),
             limit=limit,
             offset=offset,
+            **self._user_query(user_id),
         )
 
     async def aget_user_scores(self, user_id: int | str, score_type: str, *, mode: str = 'osu', include_fails: Optional[bool] = None, limit: int = 5, offset: Optional[int] = None) -> Dict[str, Any] | list[Any]:
@@ -224,6 +232,7 @@ class OsuApiClient:
             include_fails=1 if include_fails else (0 if include_fails is not None else None),
             limit=limit,
             offset=offset,
+            **self._user_query(user_id),
         )
 
     def get_recent_scores(self, user_id: int | str, mode: str = 'osu', include_fails: bool = True, limit: int = 5) -> Dict[str, Any] | list[Any]:
@@ -283,3 +292,4 @@ class OsuApiClient:
     async def aget_best_score(self, user_id: int | str, mode: str = 'osu') -> Dict[str, Any] | None:
         payload = await self.aget_best_scores(user_id=user_id, mode=mode, limit=1)
         return self._first_score(payload)
+
