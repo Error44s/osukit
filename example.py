@@ -58,21 +58,21 @@ def test_basic():
 
     bm = Beatmap(content=SAMPLE_OSU)
     print(f"\nBeatmap loaded:")
-    print(f"  Title   : {bm.title}")
-    print(f"  Circles : {bm.n_circles}")
-    print(f"  Sliders : {bm.n_sliders}")
-    print(f"  Spinners: {bm.n_spinners}")
-    print(f"  Objects : {bm.n_objects}")
+    print(f"Title   : {bm.title}")
+    print(f"Circles : {bm.n_circles}")
+    print(f"Sliders : {bm.n_sliders}")
+    print(f"Spinners: {bm.n_spinners}")
+    print(f"Objects : {bm.n_objects}")
 
     # NM
     diff_nm = Difficulty(mods=0).calculate(bm)
     print(f"\n[NM] Stars: {diff_nm.stars:.4f}")
-    print(f"     AR: {diff_nm.approach_rate:.2f} | OD: {diff_nm.overall_difficulty:.2f}")
-    print(f"     Aim: {diff_nm.aim_difficulty:.4f} | Speed: {diff_nm.speed_difficulty:.4f}")
+    print(f"AR: {diff_nm.approach_rate:.2f} | OD: {diff_nm.overall_difficulty:.2f}")
+    print(f"Aim: {diff_nm.aim_difficulty:.4f} | Speed: {diff_nm.speed_difficulty:.4f}")
 
     perf_nm = Performance(mods=0, accuracy=99.0).calculate(bm)
     print(f"\n[NM] PP at 99% acc: {perf_nm.pp:.2f}")
-    print(f"     Aim: {perf_nm.pp_aim:.2f} | Speed: {perf_nm.pp_speed:.2f} | Acc: {perf_nm.pp_accuracy:.2f}")
+    print(f"Aim: {perf_nm.pp_aim:.2f} | Speed: {perf_nm.pp_speed:.2f} | Acc: {perf_nm.pp_accuracy:.2f}")
 
     # HDHR
     diff_hdhr = Difficulty(mods=Mods.HD | Mods.HR).calculate(bm)
@@ -92,12 +92,12 @@ def test_basic():
     print("\n--- FC vs Misses comparison ---")
     fc = Performance(mods=0, accuracy=99.5, misses=0).calculate(bm)
     with_misses = Performance(mods=0, accuracy=99.5, misses=2).calculate(bm)
-    print(f"FC (99.5%):        {fc.pp:.2f} PP")
-    print(f"2 misses (99.5%):  {with_misses.pp:.2f} PP")
+    print(f"FC (99.5%): {fc.pp:.2f} PP")
+    print(f"2 misses (99.5%): {with_misses.pp:.2f} PP")
 
     # Full SS
     ss = Performance(mods=0, accuracy=100.0, misses=0).calculate(bm)
-    print(f"SS:                {ss.pp:.2f} PP")
+    print(f"SS: {ss.pp:.2f} PP")
 
     print("\nAll tests passed!")
 
@@ -109,24 +109,24 @@ def test_mods():
     bm = Beatmap(content=SAMPLE_OSU)
 
     mod_list = [
-        (0,                        "NM"),
-        (int(Mods.HD),             "HD"),
-        (int(Mods.HR),             "HR"),
-        (int(Mods.DT),             "DT"),
-        (int(Mods.HD | Mods.HR),   "HDHR"),
-        (int(Mods.HD | Mods.DT),   "HDDT"),
-        (int(Mods.EZ),             "EZ"),
-        (int(Mods.HT),             "HT"),
-        (int(Mods.FL),             "FL"),
+        (0, "NM"),
+        (int(Mods.HD), "HD"),
+        (int(Mods.HR), "HR"),
+        (int(Mods.DT), "DT"),
+        (int(Mods.HD | Mods.HR), "HDHR"),
+        (int(Mods.HD | Mods.DT), "HDDT"),
+        (int(Mods.EZ), "EZ"),
+        (int(Mods.HT), "HT"),
+        (int(Mods.FL), "FL"),
     ]
 
     for m, name in mod_list:
         try:
             d = Difficulty(mods=m).calculate(bm)
             p = Performance(mods=m, accuracy=99.0).calculate(bm)
-            print(f"  {name:<6} | Stars: {d.stars:6.3f} | PP (99%): {p.pp:8.2f}")
+            print(f"{name:<6} | Stars: {d.stars:6.3f} | PP (99%): {p.pp:8.2f}")
         except Exception as e:
-            print(f"  {name:<6} | ERROR: {e}")
+            print(f"{name:<6} | ERROR: {e}")
 
 
 if __name__ == "__main__":
