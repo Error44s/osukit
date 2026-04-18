@@ -1,0 +1,21 @@
+[
+  {
+    "name": "sample-std-98",
+    "beatmap_path": "tests/data/sample_std.osu",
+    "accuracy": 98.0,
+    "misses": 1,
+    "difficulty": {
+      "stars": 0.34,
+      "tolerance": 0.5
+    },
+    "performance": {
+      "pp": 0.52,
+      "tolerance": 1.0
+    },
+    "tags": [
+      "sample",
+      "std",
+      "nomod"
+    ]
+  }
+]
