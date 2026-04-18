@@ -43,7 +43,12 @@ except Exception: # pragma: no cover - optional dependency
 
 
 @dataclass
-class OsuApiClient:
+class OsuApiClient
+    def _user_query(self, user):
+        if isinstance(user, str) and not user.isdigit():
+            return {'key': 'username'}
+        return {}
+:
     token: str | None = None
     base_url: str = 'https://osu.ppy.sh/api/v2'
     timeout: int = 15
@@ -202,7 +207,7 @@ class OsuApiClient:
         return self._get(f'users/{user}/{mode}' if mode else f'users/{user}')
 
     async def aget_user(self, user: str | int, mode: Optional[str] = None) -> Dict[str, Any]:
-        return await self._aget(f'users/{user}/{mode}' if mode else f'users/{user}')
+        return await self._aget(f'users/{user}/{mode}' if mode else f'users/{user}', **self._user_query(user_id))
 
     def get_user_scores(self, user_id: int | str, score_type: str, *, mode: str = 'osu', include_fails: Optional[bool] = None, limit: int = 5, offset: Optional[int] = None) -> Dict[str, Any] | list[Any]:
         return self._get(
