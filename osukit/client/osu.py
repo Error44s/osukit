@@ -43,12 +43,11 @@ except Exception: # pragma: no cover - optional dependency
 
 
 @dataclass
-class OsuApiClient
+class OsuApiClient:
     def _user_query(self, user):
         if isinstance(user, str) and not user.isdigit():
             return {'key': 'username'}
         return {}
-:
     token: str | None = None
     base_url: str = 'https://osu.ppy.sh/api/v2'
     timeout: int = 15
