@@ -159,35 +159,39 @@ class OsuBotClient:
 
     def get_current_play(self, user: str | int, *, mode: Optional[str] = None, include_fails: bool = True, object_index: int | None = None, replay_frames: Sequence[ReplayFrame] | None = None) -> PlayResult:
         actual_mode = mode or self.config.default_mode
-        key = f'current:{actual_mode}:{user}:{int(include_fails)}'
-        api_score = self._cached(self._score_cache, key, lambda: self.api.get_recent_score(user, actual_mode, include_fails))
+        profile = self.get_profile(user, mode=actual_mode)
+        user_id = profile.user_id
+        key = f'current:{actual_mode}:{user_id}:{int(include_fails)}'
+        api_score = self._cached(self._score_cache, key, lambda: self.api.get_recent_score(user_id, actual_mode, include_fails))
         if not api_score:
             raise OsuApiError('No recent score found for this user.')
-        profile = self.get_profile(user, mode=actual_mode)
         return self._make_play_result('current', user, api_score, object_index=object_index, profile=profile, replay_frames=replay_frames)
 
     async def aget_current_play(self, user: str | int, *, mode: Optional[str] = None, include_fails: bool = True, object_index: int | None = None, replay_frames: Sequence[ReplayFrame] | None = None) -> PlayResult:
         actual_mode = mode or self.config.default_mode
-        key = f'current:{actual_mode}:{user}:{int(include_fails)}'
-        api_score = await self._acached(self._score_cache, key, lambda: self.api.aget_recent_score(user, actual_mode, include_fails) if self._api_has_custom_async('aget_recent_score') else __import__('asyncio').to_thread(self.api.get_recent_score, user, actual_mode, include_fails))
+        profile = await self.aget_profile(user, mode=actual_mode)
+        user_id = profile.user_id
+        key = f'current:{actual_mode}:{user_id}:{int(include_fails)}'
+        api_score = await self._acached(self._score_cache, key, lambda: self.api.aget_recent_score(user_id, actual_mode, include_fails) if self._api_has_custom_async('aget_recent_score') else __import__('asyncio').to_thread(self.api.get_recent_score, user_id, actual_mode, include_fails))
         if not api_score:
             raise OsuApiError('No recent score found for this user.')
-        profile = await self.aget_profile(user, mode=actual_mode)
         return await self._amake_play_result('current', user, api_score, object_index=object_index, profile=profile, replay_frames=replay_frames)
 
     def get_recent_plays(self, user: str | int, *, mode: Optional[str] = None, include_fails: bool = True, limit: int = 5) -> PlayListResult:
         actual_mode = mode or self.config.default_mode
-        key = f'recent:{actual_mode}:{user}:{limit}:{int(include_fails)}'
-        payload = self._cached(self._score_cache, key, lambda: self.api.get_recent_scores(user, actual_mode, include_fails, limit))
         profile = self.get_profile(user, mode=actual_mode)
+        user_id = profile.user_id
+        key = f'recent:{actual_mode}:{user_id}:{limit}:{int(include_fails)}'
+        payload = self._cached(self._score_cache, key, lambda: self.api.get_recent_scores(user_id, actual_mode, include_fails, limit))
         plays = [self._make_play_result('recent', user, score, profile=profile) for score in (payload or [])[:limit]]
         return PlayListResult(kind='recent', user_query=user, plays=plays, profile=profile)
 
     async def aget_recent_plays(self, user: str | int, *, mode: Optional[str] = None, include_fails: bool = True, limit: int = 5) -> PlayListResult:
         actual_mode = mode or self.config.default_mode
-        key = f'recent:{actual_mode}:{user}:{limit}:{int(include_fails)}'
-        payload = await self._acached(self._score_cache, key, lambda: self.api.aget_recent_scores(user, actual_mode, include_fails, limit) if self._api_has_custom_async('aget_recent_scores') else __import__('asyncio').to_thread(self.api.get_recent_scores, user, actual_mode, include_fails, limit))
         profile = await self.aget_profile(user, mode=actual_mode)
+        user_id = profile.user_id
+        key = f'recent:{actual_mode}:{user_id}:{limit}:{int(include_fails)}'
+        payload = await self._acached(self._score_cache, key, lambda: self.api.aget_recent_scores(user_id, actual_mode, include_fails, limit) if self._api_has_custom_async('aget_recent_scores') else __import__('asyncio').to_thread(self.api.get_recent_scores, user_id, actual_mode, include_fails, limit))
         plays = [await self._amake_play_result('recent', user, score, profile=profile) for score in (payload or [])[:limit]]
         return PlayListResult(kind='recent', user_query=user, plays=plays, profile=profile)
 
@@ -201,17 +205,19 @@ class OsuBotClient:
 
     def get_top_plays(self, user: str | int, *, mode: Optional[str] = None, limit: int = 5, offset: int | None = None) -> PlayListResult:
         actual_mode = mode or self.config.default_mode
-        key = f'top:{actual_mode}:{user}:{limit}:{offset}'
-        payload = self._cached(self._score_cache, key, lambda: self.api.get_best_scores(user, actual_mode, limit, offset))
         profile = self.get_profile(user, mode=actual_mode)
+        user_id = profile.user_id
+        key = f'top:{actual_mode}:{user_id}:{limit}:{offset}'
+        payload = self._cached(self._score_cache, key, lambda: self.api.get_best_scores(user_id, actual_mode, limit, offset))
         plays = [self._make_play_result('best', user, score, profile=profile) for score in (payload or [])[:limit]]
         return PlayListResult(kind='best', user_query=user, plays=plays, profile=profile)
 
     async def aget_top_plays(self, user: str | int, *, mode: Optional[str] = None, limit: int = 5, offset: int | None = None) -> PlayListResult:
         actual_mode = mode or self.config.default_mode
-        key = f'top:{actual_mode}:{user}:{limit}:{offset}'
-        payload = await self._acached(self._score_cache, key, lambda: self.api.aget_best_scores(user, actual_mode, limit, offset) if self._api_has_custom_async('aget_best_scores') else __import__('asyncio').to_thread(self.api.get_best_scores, user, actual_mode, limit, offset))
         profile = await self.aget_profile(user, mode=actual_mode)
+        user_id = profile.user_id
+        key = f'top:{actual_mode}:{user_id}:{limit}:{offset}'
+        payload = await self._acached(self._score_cache, key, lambda: self.api.aget_best_scores(user_id, actual_mode, limit, offset) if self._api_has_custom_async('aget_best_scores') else __import__('asyncio').to_thread(self.api.get_best_scores, user_id, actual_mode, limit, offset))
         plays = [await self._amake_play_result('best', user, score, profile=profile) for score in (payload or [])[:limit]]
         return PlayListResult(kind='best', user_query=user, plays=plays, profile=profile)
 
@@ -231,8 +237,9 @@ class OsuBotClient:
         actual_mode = mode or self.config.default_mode
 
         def pick(user: str | int) -> PlayResult:
-            payload = self.api.get_recent_scores(user, actual_mode, include_fails, 10)
             profile = self.get_profile(user, mode=actual_mode)
+            user_id = profile.user_id
+            payload = self.api.get_recent_scores(user_id, actual_mode, include_fails, 10)
             for score in payload or []:
                 score_beatmap_id = score.get('beatmap_id') or (score.get('beatmap') or {}).get('id')
                 if score_beatmap_id == beatmap_id:
@@ -247,8 +254,9 @@ class OsuBotClient:
         actual_mode = mode or self.config.default_mode
 
         async def pick(user: str | int) -> PlayResult:
-            payload = await (self.api.aget_recent_scores(user, actual_mode, include_fails, 10) if self._api_has_custom_async('aget_recent_scores') else __import__('asyncio').to_thread(self.api.get_recent_scores, user, actual_mode, include_fails, 10))
             profile = await self.aget_profile(user, mode=actual_mode)
+            user_id = profile.user_id
+            payload = await (self.api.aget_recent_scores(user_id, actual_mode, include_fails, 10) if self._api_has_custom_async('aget_recent_scores') else __import__('asyncio').to_thread(self.api.get_recent_scores, user_id, actual_mode, include_fails, 10))
             for score in payload or []:
                 score_beatmap_id = score.get('beatmap_id') or (score.get('beatmap') or {}).get('id')
                 if score_beatmap_id == beatmap_id:
