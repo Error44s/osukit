@@ -29,52 +29,66 @@ from typing import List, Optional
 
 from .beatmap import Beatmap, HitCircle, Slider, Spinner, Vec2, Mods
 
-NORMALIZED_RADIUS = 50.0
+
+# Constants
+NORMALIZED_RADIUS = 50.0 # osu! normalised circle radius
 MAXIMUM_SLIDER_RADIUS = NORMALIZED_RADIUS * 2.4
 ASSUMED_SLIDER_RADIUS = NORMALIZED_RADIUS * 1.8
 
+# Aim
 AIM_SKILL_MULTIPLIER = 23.55
 AIM_STRAIN_DECAY_BASE = 0.15
 
+# Speed
 SPEED_SKILL_MULTIPLIER = 1375.0
 SPEED_STRAIN_DECAY_BASE = 0.3
 SINGLE_SPACING_THRESHOLD = 125.0
-MIN_SPEED_BONUS = 75.0
+MIN_SPEED_BONUS = 75.0 # ms deltatime (= ~200 BPM 1/4)
 
+# Flashlight
 FL_SKILL_MULTIPLIER = 0.052
 FL_STRAIN_DECAY_BASE = 0.15
 
-STRAIN_DECAY_EXPONENT = 400.0
+STRAIN_DECAY_EXPONENT = 400.0 # used in strain weighting
 DECAY_WEIGHT = 0.94
 
+
+# Difficulty hit object (wraps a HitObject + computed data)
 @dataclass
 class DiffHitObject:
-    base: object
-    pos: Vec2
-    last_pos: Vec2
-    last_last_pos: Vec2
-    time: float
-    delta_time: float
-    strain_time: float
+    base: object           # HitCircle | Slider | Spinner
+    pos: Vec2              # stacked position
+    last_pos: Vec2         # previous object's stacked pos
+    last_last_pos: Vec2    # two objects ago
+    time: float            # ms
+    delta_time: float      # ms since last object
+    strain_time: float     # clamped delta_time
 
     jump_dist: float = 0.0
-    travel_dist: float = 0.0
-    movement_dist: float = 0.0
-    angle: Optional[float] = None
+    travel_dist: float = 0.0   # for sliders: lazy travel distance
+    movement_dist: float = 0.0 # travel_dist + jump
+    angle: Optional[float] = None  # angle at this object
     rhythm_complexity: float = 0.0
+
 
 def _get_stacked_pos(obj) -> Vec2:
     return getattr(obj, "_stacked_pos", obj.pos)
+
 
 def _build_diff_objects(
     hit_objects: list,
     clock_rate: float,
     cs: float,
 ) -> List[DiffHitObject]:
+    """Convert raw hit objects into difficulty objects with precomputed geometry."""
     if not hit_objects:
         return []
 
+    # osu! normalises positions by circle size
+    scale = (1.0 - 0.7 * (cs - 5.0) / 5.0) / 2.0
+    # scale factor to map to normalised radius
     scale_factor = NORMALIZED_RADIUS / (54.4 - 4.48 * cs)
+
     diff_objects: List[DiffHitObject] = []
 
     def norm(pos: Vec2) -> Vec2:
@@ -104,7 +118,7 @@ def _build_diff_objects(
         prev = hit_objects[i - 1]
         prev_end_time = prev.end_time if isinstance(prev, Slider) else prev.time
         delta_time = (obj.time - prev_end_time) / clock_rate
-        strain_time = max(delta_time, 25.0)
+        strain_time = max(delta_time, 25.0)  # clamp to avoid division by zero
 
         dobj = DiffHitObject(
             base=obj,
@@ -116,9 +130,11 @@ def _build_diff_objects(
             strain_time=strain_time,
         )
 
+        # jump distance (from prev end pos to current pos)
         if isinstance(prev, Slider):
-            last_cursor = norm(_get_stacked_pos(prev))
+            last_cursor = norm(_get_stacked_pos(prev))  # approximation: use head
             if prev.curve_points:
+                # use last curve point as end
                 last_cursor = norm(getattr(prev, "_stacked_pos", prev.curve_points[-1]))
             dobj.jump_dist = last_cursor.distance_to(pos)
             dobj.travel_dist = min(prev.lazy_travel_dist * scale_factor, MAXIMUM_SLIDER_RADIUS)
@@ -128,6 +144,7 @@ def _build_diff_objects(
 
         dobj.movement_dist = dobj.travel_dist + dobj.jump_dist
 
+        # angle
         if i >= 2:
             v1 = Vec2(last_last_pos.x - last_pos.x, last_last_pos.y - last_pos.y)
             v2 = Vec2(pos.x - last_pos.x, pos.y - last_pos.y)
@@ -143,6 +160,7 @@ def _build_diff_objects(
 
     return diff_objects
 
+# Skill: Aim
 def _evaluate_aim(curr: DiffHitObject, prev: DiffHitObject, with_sliders: bool) -> float:
     if isinstance(curr.base, Spinner):
         return 0.0
@@ -155,6 +173,7 @@ def _evaluate_aim(curr: DiffHitObject, prev: DiffHitObject, with_sliders: bool) 
     if curr.jump_dist == 0 and curr.travel_dist == 0:
         return 0.0
 
+    # Wide angle bonus
     wide_angle_bonus = 0.0
     acute_angle_bonus = 0.0
 
@@ -170,33 +189,40 @@ def _evaluate_aim(curr: DiffHitObject, prev: DiffHitObject, with_sliders: bool) 
 
     aim_strain = curr_vel
 
+    # Apply angle bonuses
     if wide_angle_bonus > 0:
         aim_strain += wide_angle_bonus * curr_vel
     if acute_angle_bonus > 0:
         aim_strain += acute_angle_bonus * max(0, curr_vel - 0.5)
 
+    # Slider bonus
     if with_sliders and isinstance(curr.base, Slider):
         aim_strain += curr.travel_dist / curr.strain_time
 
     return aim_strain
 
+
 def _calc_wide_angle_bonus(angle: float) -> float:
     return math.pow(math.sin(3.0 / 4.0 * (min(5.0 / 6.0 * math.pi, angle) - math.pi / 6)), 2)
 
+
 def _calc_acute_angle_bonus(angle: float) -> float:
     return math.pow(math.sin(1.5 * (max(0, angle - math.pi / 6))), 2)
+
 
 def _smooth_step(edge0: float, edge1: float, x: float) -> float:
     t = max(0.0, min(1.0, (x - edge0) / (edge1 - edge0)))
     return t * t * (3.0 - 2.0 * t)
 
+# Skill: Speed
 def _evaluate_speed(curr: DiffHitObject) -> float:
     if isinstance(curr.base, Spinner):
         return 0.0
 
     strain_time = curr.strain_time
-    great_window = 79.5 - curr.strain_time * 0.5
+    great_window = 79.5 - curr.strain_time * 0.5  # simplified
 
+    # Distance bonus
     dist = min(SINGLE_SPACING_THRESHOLD, curr.travel_dist + curr.jump_dist)
     delta_time = max(strain_time, great_window)
 
@@ -212,22 +238,31 @@ def _evaluate_speed(curr: DiffHitObject) -> float:
 
     return (1.0 + speed_bonus) * angle_bonus * dist_bonus / strain_time
 
+# Skill: Flashlight
 def _evaluate_flashlight(curr: DiffHitObject, hidden: bool) -> float:
     if isinstance(curr.base, Spinner):
         return 0.0
 
     scaling_factor = 52.0
+    small_dist_nerf = 1.0
+    cumulative_strain_time = 0.0
+    result = 0.0
+
+    # Simplified: just use jump distance scaled by time
     opacity_bonus = 1.0
     if hidden:
         opacity_bonus = 1.0 + 0.4 * min(1.0, curr.jump_dist / scaling_factor)
 
-    return math.pow(0.8, max(0, curr.jump_dist / scaling_factor - 1)) * opacity_bonus
+    result += math.pow(0.8, max(0, curr.jump_dist / scaling_factor - 1)) * opacity_bonus
+    return result
 
+# Strain computation
 def _compute_skill_strains(
     diff_objects: List[DiffHitObject],
     evaluator,
     decay_base: float,
 ) -> List[float]:
+    """Generic strain accumulator for a given evaluator function."""
     if not diff_objects:
         return []
 
@@ -248,7 +283,9 @@ def _compute_skill_strains(
 
     return strains
 
+
 def _difficulty_value(strains: List[float], decay_weight: float = DECAY_WEIGHT) -> float:
+    """Convert a list of strains into a single difficulty value (like osu!lazer)."""
     if not strains:
         return 0.0
 
@@ -262,6 +299,7 @@ def _difficulty_value(strains: List[float], decay_weight: float = DECAY_WEIGHT) 
 
     return difficulty
 
+# Difficulty Attributes result
 @dataclass
 class DifficultyAttributes:
     stars: float = 0.0
@@ -280,6 +318,7 @@ class DifficultyAttributes:
     spinner_count: int = 0
     max_combo: int = 0
 
+# Public API: Difficulty calculator
 def calculate_difficulty(
     beatmap: Beatmap,
     mods: Mods = Mods.NM,
@@ -288,8 +327,21 @@ def calculate_difficulty(
     od_override: Optional[float] = None,
     cs_override: Optional[float] = None,
 ) -> DifficultyAttributes:
+    """
+    Calculate difficulty attributes for osu! standard.
+
+    Parameters
+    ----------
+    beatmap     : parsed Beatmap object
+    mods        : Mods bitfield (default NM)
+    clock_rate  : override clock rate (default from mods)
+    ar_override : override approach rate (after mod scaling)
+    od_override : override overall difficulty (after mod scaling)
+    cs_override : override circle size (after mod scaling)
+    """
     cr = clock_rate or mods.speed_multiplier
 
+    # Effective stats
     cs = min(10.0, (cs_override if cs_override is not None else beatmap.cs) * mods.cs_multiplier)
     ar_raw = (ar_override if ar_override is not None else beatmap.ar)
     od_raw = (od_override if od_override is not None else beatmap.od)
@@ -303,6 +355,7 @@ def calculate_difficulty(
 
     diff_objects = _build_diff_objects(hit_objects, cr, cs)
 
+    # Aim
     aim_strains_sliders: List[float] = []
     aim_strains_no_sliders: List[float] = []
     current_aim = 0.0
@@ -324,8 +377,11 @@ def calculate_difficulty(
     aim_diff_no_sliders = _difficulty_value(aim_strains_no_sliders)
     slider_factor = aim_diff_no_sliders / aim_diff if aim_diff > 0 else 1.0
 
+    # Speed
     speed_strains: List[float] = []
     current_speed = 0.0
+    speed_note_count = 0.0
+
     for i, curr in enumerate(diff_objects):
         if i == 0:
             speed_strains.append(0.0)
@@ -336,18 +392,30 @@ def calculate_difficulty(
 
     speed_diff = _difficulty_value(speed_strains)
 
-    speed_note_count = 0.0
-    object_strains = sorted([s / 1375.0 for s in speed_strains if s > 0], reverse=True)
-    if object_strains and object_strains[0] > 0:
+    # Speed note count
+    object_strains = sorted(
+        [s / 1375.0 for s in speed_strains if s > 0],
+        reverse=True
+    )
+    if object_strains:
         max_strain = object_strains[0]
-        speed_note_count = sum(1.0 / (1.0 + math.exp(-(strain / max_strain * 12.0 - 6.0))) for strain in object_strains)
+        if max_strain > 0:
+            speed_note_count = sum(
+                1.0 / (1.0 + math.exp(-(strain / max_strain * 12.0 - 6.0)))
+                for strain in object_strains
+            )
 
+    # Aim difficult strain count
     aim_note_count = 0.0
     aim_object_strains = sorted(aim_strains_sliders, reverse=True)
     if aim_object_strains and aim_object_strains[0] > 0:
         max_aim = aim_object_strains[0]
-        aim_note_count = sum(1.0 / (1.0 + math.exp(-(s / max_aim * 12.0 - 6.0))) for s in aim_object_strains)
+        aim_note_count = sum(
+            1.0 / (1.0 + math.exp(-(s / max_aim * 12.0 - 6.0)))
+            for s in aim_object_strains
+        )
 
+    # Flashlight
     fl_diff = 0.0
     with_hidden = bool(mods & Mods.HD)
     if mods & Mods.FL:
@@ -362,22 +430,30 @@ def calculate_difficulty(
             fl_strains.append(current_fl)
         fl_diff = _difficulty_value(fl_strains)
 
+    # Combine into star rating
     aim_stars = _scale_difficulty(aim_diff)
     speed_stars = _scale_difficulty(speed_diff)
     fl_stars = _scale_difficulty(fl_diff)
 
     stars = _star_rating(aim_stars, speed_stars, fl_stars)
 
+    # Effective AR with clock rate
     if ar < 5:
         ar_ms = 1800.0 - 120.0 * ar
     else:
         ar_ms = 1200.0 - 150.0 * (ar - 5.0)
     ar_ms /= cr
-    ar_eff = (1800.0 - ar_ms) / 120.0 if ar_ms > 1200.0 else (1200.0 - ar_ms) / 150.0 + 5.0
+    if ar_ms > 1200.0:
+        ar_eff = (1800.0 - ar_ms) / 120.0
+    else:
+        ar_eff = (1200.0 - ar_ms) / 150.0 + 5.0
     ar_eff = max(0.0, min(11.0, ar_eff))
 
-    hit_window_300 = (80.0 - 6.0 * od) / cr
-    od_eff = max(0.0, min(11.0, (80.0 - hit_window_300) / 6.0))
+    # Effective OD with clock rate
+    hit_window_300 = 80.0 - 6.0 * od
+    hit_window_300 /= cr
+    od_eff = (80.0 - hit_window_300) / 6.0
+    od_eff = max(0.0, min(11.0, od_eff))
 
     return DifficultyAttributes(
         stars=max(0.0, stars),
@@ -397,13 +473,21 @@ def calculate_difficulty(
         max_combo=beatmap.max_combo,
     )
 
+
 def _scale_difficulty(difficulty: float) -> float:
+    """Scale from raw difficulty value to star rating scale."""
     if difficulty <= 0:
         return 0.0
-    return difficulty * 0.0675
+    return math.cbrt(5.0 * max(1.0, difficulty / 0.0675) - 4.0) / 100.0
+
 
 def _star_rating(aim: float, speed: float, fl: float) -> float:
-    base = math.pow(math.pow(aim, 1.35) + math.pow(speed, 1.35), 1.0 / 1.35)
-    if fl > 0:
-        base = math.pow(math.pow(base, 1.1) + math.pow(fl * 0.4, 1.1), 1.0 / 1.1)
-    return base * 1.03
+    """Combine individual skill stars into overall star rating."""
+    base = math.pow(
+        math.pow(aim, 1.1)
+        + math.pow(speed, 1.1)
+        + math.pow(fl * 0.4, 1.1) if fl > 0 else
+        math.pow(aim, 1.1) + math.pow(speed, 1.1),
+        1.0 / 1.1,
+    )
+    return base * 1.06
