@@ -55,6 +55,7 @@ DECAY_WEIGHT = 0.9
 REDUCED_SECTION_COUNT    = 10
 REDUCED_STRAIN_BASELINE  = 0.75
 SPEED_REDUCED_SECTION_COUNT = 5  # Speed overrides to 5
+SECTION_LENGTH = 400.0
 
 # Star rating (osukit-pp: STAR_RATING_MULTIPLIER = 0.0265, PERFORMANCE_BASE_MULTIPLIER = 1.14)
 STAR_RATING_MULTIPLIER       = 0.0265
@@ -183,12 +184,11 @@ def _build_diff_objects(
             if prev_end is None:
                 # compute and cache
                 if prev.curve_points:
-                    tail_raw = prev.curve_points[-1]
-                    if prev.repeats % 2 == 0:
-                        # even repeats → ends at tail
+                    if prev.repeats % 2 == 1:
+                        # odd repeat count / single-span sliders end at the tail
                         tail_raw = prev.curve_points[-1]
                     else:
-                        # odd repeats → ends at head
+                        # even repeat count ends back at the head
                         tail_raw = _get_stacked_pos(prev)
                 else:
                     tail_raw = _get_stacked_pos(prev)
@@ -257,6 +257,48 @@ def _evaluate_aim(curr: DiffHitObject, prev: DiffHitObject, with_sliders: bool) 
 
     return aim_strain
 
+
+
+
+def _compute_section_peaks(
+    diff_objects: List[DiffHitObject],
+    decay_base: float,
+    value_fn,
+    skill_multiplier: float,
+):
+    """Compute osu!-style 400ms section peaks for a strain skill."""
+    if not diff_objects:
+        return [], []
+
+    if len(diff_objects) == 1:
+        return [0.0], [0.0]
+
+    section_end = math.ceil(diff_objects[0].time / SECTION_LENGTH) * SECTION_LENGTH
+    current_strain = 0.0
+    current_section_peak = 0.0
+    object_strains: List[float] = [0.0]
+    section_peaks: List[float] = []
+
+    for i in range(1, len(diff_objects)):
+        curr = diff_objects[i]
+        prev = diff_objects[i - 1]
+
+        while curr.time > section_end:
+            section_peaks.append(current_section_peak)
+            current_strain *= math.pow(decay_base, (section_end - prev.time) / 1000.0)
+            current_section_peak = current_strain
+            section_end += SECTION_LENGTH
+
+        strain_value = value_fn(curr, prev)
+        current_strain *= math.pow(decay_base, curr.delta_time / 1000.0)
+        current_strain += strain_value * skill_multiplier
+
+        object_strains.append(current_strain)
+        current_section_peak = max(current_section_peak, current_strain)
+
+    section_peaks.append(current_section_peak)
+
+    return object_strains, section_peaks
 
 def _calc_wide_angle_bonus(angle: float) -> float:
     return math.pow(math.sin(3.0 / 4.0 * (min(5.0 / 6.0 * math.pi, angle) - math.pi / 6)), 2)
@@ -455,45 +497,40 @@ def calculate_difficulty(
 
     diff_objects = _build_diff_objects(hit_objects, cr, cs, od)
 
-    # Aim strain
-    aim_strains_sliders:    List[float] = []
-    aim_strains_no_sliders: List[float] = []
-    current_aim            = 0.0
-    current_aim_no_slider  = 0.0
+    # Aim strain (object strains + 400ms section peaks)
+    aim_object_strains, aim_section_peaks = _compute_section_peaks(
+        diff_objects,
+        AIM_STRAIN_DECAY_BASE,
+        lambda curr, prev: _evaluate_aim(curr, prev, True),
+        AIM_SKILL_MULTIPLIER,
+    )
+    aim_no_slider_object_strains, aim_no_slider_section_peaks = _compute_section_peaks(
+        diff_objects,
+        AIM_STRAIN_DECAY_BASE,
+        lambda curr, prev: _evaluate_aim(curr, prev, False),
+        AIM_SKILL_MULTIPLIER,
+    )
 
-    for i, curr in enumerate(diff_objects):
-        if i == 0:
-            aim_strains_sliders.append(0.0)
-            aim_strains_no_sliders.append(0.0)
-            continue
-        prev = diff_objects[i - 1]
-        decay = math.pow(AIM_STRAIN_DECAY_BASE, curr.delta_time / 1000.0)
-        current_aim           = current_aim          * decay + _evaluate_aim(curr, prev, True)  * AIM_SKILL_MULTIPLIER
-        current_aim_no_slider = current_aim_no_slider * decay + _evaluate_aim(curr, prev, False) * AIM_SKILL_MULTIPLIER
-        aim_strains_sliders.append(current_aim)
-        aim_strains_no_sliders.append(current_aim_no_slider)
+    aim_diff = _difficulty_value(aim_section_peaks)
+    aim_diff_no_sliders = _difficulty_value(aim_no_slider_section_peaks)
+    slider_factor = aim_diff_no_sliders / aim_diff if aim_diff > 0 else 1.0
 
-    aim_diff            = _difficulty_value(aim_strains_sliders)
-    aim_diff_no_sliders = _difficulty_value(aim_strains_no_sliders)
-    slider_factor       = aim_diff_no_sliders / aim_diff if aim_diff > 0 else 1.0
+    # Speed strain (use section peaks for star difficulty, object strains for note count)
+    speed_object_strains, speed_section_peaks = _compute_section_peaks(
+        diff_objects,
+        SPEED_STRAIN_DECAY_BASE,
+        lambda curr, prev: _evaluate_speed(curr),
+        SPEED_SKILL_MULTIPLIER,
+    )
 
-    # Speed strain
-    speed_strains: List[float] = []
-    current_speed = 0.0
-
-    for i, curr in enumerate(diff_objects):
-        if i == 0:
-            speed_strains.append(0.0)
-            continue
-        decay = math.pow(SPEED_STRAIN_DECAY_BASE, curr.delta_time / 1000.0)
-        current_speed = current_speed * decay + _evaluate_speed(curr) * SPEED_SKILL_MULTIPLIER
-        speed_strains.append(current_speed)
-
-    speed_diff = _difficulty_value(speed_strains, reduced_section_count=SPEED_REDUCED_SECTION_COUNT)
+    speed_diff = _difficulty_value(
+        speed_section_peaks,
+        reduced_section_count=SPEED_REDUCED_SECTION_COUNT,
+    )
 
     # Speed note count (logistic weighting)
     speed_note_count  = 0.0
-    object_strains    = sorted([s for s in speed_strains if s > 0], reverse=True)
+    object_strains    = sorted([s for s in speed_object_strains if s > 0], reverse=True)
     if object_strains:
         max_strain = object_strains[0]
         if max_strain > 0:
@@ -504,7 +541,7 @@ def calculate_difficulty(
 
     # Aim difficult strain count
     aim_note_count     = 0.0
-    aim_sorted         = sorted(aim_strains_sliders, reverse=True)
+    aim_sorted         = sorted(aim_object_strains, reverse=True)
     if aim_sorted and aim_sorted[0] > 0:
         max_aim = aim_sorted[0]
         aim_note_count = sum(
