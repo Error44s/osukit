@@ -29,26 +29,36 @@ from typing import List, Optional
 
 from .beatmap import Beatmap, HitCircle, Slider, Spinner, Vec2, Mods
 
-# Constants  (matching osu!lazer as of 2024-2025)
+# Constants  (matching osu!lazer / osukit-pp)
 NORMALIZED_RADIUS = 50.0 # osu! normalised circle radius
 MAXIMUM_SLIDER_RADIUS = NORMALIZED_RADIUS * 2.4
 ASSUMED_SLIDER_RADIUS = NORMALIZED_RADIUS * 1.8
 
-# Aim
-AIM_SKILL_MULTIPLIER = 23.55
+# Aim  (osukit-pp: Aim::SKILL_MULTIPLIER = 26.0)
+AIM_SKILL_MULTIPLIER = 26.0
 AIM_STRAIN_DECAY_BASE = 0.15
 
-# Speed
-SPEED_SKILL_MULTIPLIER = 1375.0
+# Speed  (osukit-pp: Speed::SKILL_MULTIPLIER = 1.47)
+SPEED_SKILL_MULTIPLIER = 1.47
 SPEED_STRAIN_DECAY_BASE = 0.3
 SINGLE_SPACING_THRESHOLD = 125.0
 MIN_SPEED_BONUS = 75.0   # ms  (≈ 200 BPM 1/4)
 
-# Flashlight
-FL_SKILL_MULTIPLIER  = 0.052
+# Flashlight  (osukit-pp: Flashlight::SKILL_MULTIPLIER = 0.05512)
+FL_SKILL_MULTIPLIER  = 0.05512
 FL_STRAIN_DECAY_BASE = 0.15
 
-DECAY_WEIGHT = 0.94
+# OsuStrainSkill decay weight (osukit-pp StrainSkill::DECAY_WEIGHT = 0.9)
+DECAY_WEIGHT = 0.9
+
+# OsuStrainSkill reduced-section constants (osukit-pp)
+REDUCED_SECTION_COUNT    = 10
+REDUCED_STRAIN_BASELINE  = 0.75
+SPEED_REDUCED_SECTION_COUNT = 5  # Speed overrides to 5
+
+# Star rating (osukit-pp: STAR_RATING_MULTIPLIER = 0.0265, PERFORMANCE_BASE_MULTIPLIER = 1.14)
+STAR_RATING_MULTIPLIER       = 0.0265
+PERFORMANCE_BASE_MULTIPLIER  = 1.14
 
 # Difficulty hit-object
 @dataclass
@@ -267,21 +277,24 @@ def _evaluate_speed(curr: DiffHitObject) -> float:
 
     strain_time  = curr.strain_time
     great_window = curr.great_window
-    effective_delta = max(strain_time, great_window)
+
+    # Cap strain_time to hit window (osukit-pp: strain_time /= clamp(strain_time/hw/0.93, 0.92, 1.0))
+    if great_window > 0:
+        ratio = strain_time / great_window / 0.93
+        strain_time /= max(0.92, min(1.0, ratio))
 
     dist = min(SINGLE_SPACING_THRESHOLD, curr.travel_dist + curr.jump_dist)
 
+    # Speed bonus for BPM > 200 (MIN_SPEED_BONUS = 75ms)
     speed_bonus = 0.0
     if strain_time < MIN_SPEED_BONUS:
         speed_bonus = 0.75 * math.pow((MIN_SPEED_BONUS - strain_time) / 40.0, 2)
 
-    angle_bonus = 1.0
-    if curr.angle is not None and curr.angle < math.pi / 2:
-        angle_bonus = 1.0 + math.pow(math.sin(1.5 * (math.pi / 2 - curr.angle)), 2) * 0.3
+    # Distance bonus: osukit-pp uses (dist/threshold)^3.95 * 0.8
+    dist_bonus = math.pow(dist / SINGLE_SPACING_THRESHOLD, 3.95) * 0.8
 
-    dist_bonus = math.pow(math.sin(math.pi / 2 * min(1.0, dist / SINGLE_SPACING_THRESHOLD)), 2)
-
-    return (1.0 + speed_bonus) * angle_bonus * dist_bonus / effective_delta
+    # Base difficulty (osukit-pp: (1 + speed_bonus + dist_bonus) * 1000 / strain_time)
+    return (1.0 + speed_bonus + dist_bonus) * 1000.0 / strain_time
 
 
 def _evaluate_flashlight(curr: DiffHitObject, hidden: bool) -> float:
@@ -297,11 +310,38 @@ def _evaluate_flashlight(curr: DiffHitObject, hidden: bool) -> float:
     return result
 
 # Strain → difficulty value
-def _difficulty_value(strains: List[float], decay_weight: float = DECAY_WEIGHT) -> float:
-    """Weighted sum of sorted strains — identical to osu!lazer StrainDecaySkill."""
+def _difficulty_value(
+    strains: List[float],
+    decay_weight: float = DECAY_WEIGHT,
+    reduced_section_count: int = REDUCED_SECTION_COUNT,
+    reduced_strain_baseline: float = REDUCED_STRAIN_BASELINE,
+) -> float:
+    """Weighted sum of sorted strains — matches osukit-pp OsuStrainSkill::difficulty_value.
+
+    The top `reduced_section_count` strains are scaled down logarithmically
+    (the "reduced section" mechanic) before the weighted sum is computed.
+    Strains of 0 are excluded (osukit-pp excludes zero-strain sections).
+    """
     if not strains:
         return 0.0
-    sorted_strains = sorted(strains, reverse=True)
+
+    # Exclude zero-strain sections (osukit-pp does this to avoid worst-case sort)
+    peaks = [s for s in strains if s > 0.0]
+    if not peaks:
+        return 0.0
+
+    sorted_strains = sorted(peaks, reverse=True)
+
+    # Apply reduced-section scaling to the top strains
+    for i in range(min(reduced_section_count, len(sorted_strains))):
+        clamped = i / reduced_section_count  # already in [0,1]
+        import math as _math
+        scale = _math.log10(1.0 + 9.0 * clamped)  # lerp(1,10,clamped) then log10
+        sorted_strains[i] *= reduced_strain_baseline + (1.0 - reduced_strain_baseline) * scale
+
+    # Re-sort after scaling (top strains were reduced, order may shift)
+    sorted_strains.sort(reverse=True)
+
     difficulty = 0.0
     weight     = 1.0
     for s in sorted_strains:
@@ -310,9 +350,21 @@ def _difficulty_value(strains: List[float], decay_weight: float = DECAY_WEIGHT) 
     return difficulty
 
 # Star rating helpers
+def _difficulty_to_performance(difficulty: float) -> float:
+    """Convert a difficulty rating (aim_stars / speed_stars) to raw performance value.
+    Matches osukit-pp: difficulty_to_performance(d) = (5*max(1, d/0.0675) - 4)^3 / 100_000
+    """
+    return math.pow(5.0 * max(1.0, difficulty / 0.0675) - 4.0, 3.0) / 100_000.0
+
+
+def _flashlight_difficulty_to_performance(difficulty: float) -> float:
+    """Matches osukit-pp Flashlight::difficulty_to_performance = 25 * d^2"""
+    return 25.0 * math.pow(difficulty, 2.0)
+
+
 def _scale_difficulty(difficulty: float) -> float:
-    """Convert raw weighted-strain sum to star-rating component.
-    Matches osu!lazer: aimRating = sqrt(DifficultyValue()) * 0.0675
+    """Convert raw weighted-strain sum to star-rating component (same as osukit-pp).
+    difficulty_rating = sqrt(difficulty_value) * DIFFICULTY_MULTIPLIER (0.0675)
     """
     if difficulty <= 0:
         return 0.0
@@ -320,13 +372,34 @@ def _scale_difficulty(difficulty: float) -> float:
 
 
 def _star_rating(aim: float, speed: float, fl: float) -> float:
-    """Combine skill star values into overall star rating.
-    Matches osu!lazer: 1.06 * sqrt(aim^2 + speed^2 [+ fl^2])
+    """Combine skill star values into overall star rating — matches osukit-pp exactly.
+
+    osukit-pp approach:
+      1. Convert each skill rating to a base-performance value
+      2. Combine via powf(1.1) norm
+      3. Convert combined performance back to stars via:
+         stars = cbrt(PERFORMANCE_BASE_MULTIPLIER) * STAR_RATING_MULTIPLIER
+                 * (cbrt(100_000 / 2^(1/1.1) * base_performance) + 4)
     """
-    base_sq = aim * aim + speed * speed
-    if fl > 0:
-        base_sq += (fl * 0.4) * (fl * 0.4)
-    return 1.06 * math.sqrt(base_sq)
+    base_aim   = _difficulty_to_performance(aim)
+    base_speed = _difficulty_to_performance(speed)
+    base_fl    = _flashlight_difficulty_to_performance(fl) if fl > 0 else 0.0
+
+    base_perf = math.pow(
+        math.pow(base_aim,   1.1)
+        + math.pow(base_speed, 1.1)
+        + math.pow(base_fl,   1.1),
+        1.0 / 1.1,
+    )
+
+    if base_perf <= 1e-5:
+        return 0.0
+
+    return (
+        math.pow(PERFORMANCE_BASE_MULTIPLIER, 1.0 / 3.0)
+        * STAR_RATING_MULTIPLIER
+        * (math.pow(100_000.0 / math.pow(2.0, 1.0 / 1.1) * base_perf, 1.0 / 3.0) + 4.0)
+    )
 
 # DifficultyAttributes result
 @dataclass
@@ -416,7 +489,7 @@ def calculate_difficulty(
         current_speed = current_speed * decay + _evaluate_speed(curr) * SPEED_SKILL_MULTIPLIER
         speed_strains.append(current_speed)
 
-    speed_diff = _difficulty_value(speed_strains)
+    speed_diff = _difficulty_value(speed_strains, reduced_section_count=SPEED_REDUCED_SECTION_COUNT)
 
     # Speed note count (logistic weighting)
     speed_note_count  = 0.0
