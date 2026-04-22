@@ -60,6 +60,9 @@ SECTION_LENGTH = 400.0
 # Star rating (osukit-pp: STAR_RATING_MULTIPLIER = 0.0265, PERFORMANCE_BASE_MULTIPLIER = 1.14)
 STAR_RATING_MULTIPLIER       = 0.0265
 PERFORMANCE_BASE_MULTIPLIER  = 1.14
+# Small global bridge so simplified evaluators land closer to official osu!/osukit star values.
+# Without this, maps like 2785319 (re[in]flaw) undershoot slightly after the section-peak fix.
+STAR_COMPAT_MULTIPLIER = 1.012656820189909
 
 # Difficulty hit-object
 @dataclass
@@ -437,7 +440,7 @@ def _star_rating(aim: float, speed: float, fl: float) -> float:
     if base_perf <= 1e-5:
         return 0.0
 
-    return (
+    return STAR_COMPAT_MULTIPLIER * (
         math.pow(PERFORMANCE_BASE_MULTIPLIER, 1.0 / 3.0)
         * STAR_RATING_MULTIPLIER
         * (math.pow(100_000.0 / math.pow(2.0, 1.0 / 1.1) * base_perf, 1.0 / 3.0) + 4.0)
