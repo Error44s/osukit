@@ -24,7 +24,7 @@ DEALINGS IN THE SOFTWARE.
 
 from __future__ import annotations
 import math
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Optional, TYPE_CHECKING
 
 from .beatmap import Beatmap, Mods
@@ -441,6 +441,37 @@ def calculate_performance(
             1.0 / 1.1,
         ) * 0.9
 
+    debug = {
+        "accuracy_fraction":   hit_acc,
+        "better_acc_fraction": better_acc,
+        "relevant_accuracy":   relevant_acc,
+        "length_bonus":        total_hits_factor,
+        "combo_scaling":       combo_scaling,
+        "aim_multiplier":      tuning.aim_multiplier,
+        "speed_multiplier":    tuning.speed_multiplier,
+        "accuracy_multiplier": tuning.accuracy_multiplier,
+        "final_multiplier":    tuning.final_multiplier,
+        "hd_bonus_aim":        hd_bonus,
+        "hd_bonus_speed":      speed_hd_bonus,
+        "dt_speed_bonus":      dt_speed_bonus,
+        "dt_accuracy_component": dt_accuracy_component,
+        "accuracy_hd_bonus":   accuracy_hd_bonus,
+        "slider_ratio":        slider_ratio,
+        "slider_signal":       slider_signal,
+        "slider_velocity_bonus": slider_velocity_bonus,
+        "slider_head_bonus":   slider_head_bonus,
+        "slider_tail_bonus":   slider_tail_bonus,
+        "aim_stream_bonus":    aim_stream_bonus,
+        "speed_stream_bonus":  speed_stream_bonus,
+        "miss_penalty_aim":    _miss_penalty(effective_miss_count, difficulty.aim_difficult_strain_count),
+        "miss_penalty_speed":  _miss_penalty(effective_miss_count, difficulty.speed_difficult_strain_count),
+        "n300": float(_n300), "n100": float(_n100),
+        "n50":  float(_n50),  "n_miss": float(_n_miss),
+    }
+
+    for key, value in asdict(tuning).items():
+        debug[f"tuning_{key}"] = float(value)
+
     return PerformanceAttributes(
         pp=max(0.0, base_pp),
         pp_aim=max(0.0, pp_aim),
@@ -449,30 +480,7 @@ def calculate_performance(
         pp_flashlight=max(0.0, pp_flashlight),
         effective_miss_count=effective_miss_count,
         difficulty=difficulty,
-        debug={
-            "accuracy_fraction":   hit_acc,
-            "better_acc_fraction": better_acc,
-            "relevant_accuracy":   relevant_acc,
-            "length_bonus":        total_hits_factor,
-            "combo_scaling":       combo_scaling,
-            "aim_multiplier":      tuning.aim_multiplier,
-            "speed_multiplier":    tuning.speed_multiplier,
-            "accuracy_multiplier": tuning.accuracy_multiplier,
-            "final_multiplier":    tuning.final_multiplier,
-            "hd_bonus_aim":        hd_bonus,
-            "hd_bonus_speed":      speed_hd_bonus,
-            "dt_speed_bonus":      dt_speed_bonus,
-            "dt_accuracy_component": dt_accuracy_component,
-            "accuracy_hd_bonus":   accuracy_hd_bonus,
-            "slider_ratio":        slider_ratio,
-            "slider_signal":       slider_signal,
-            "aim_stream_bonus":    aim_stream_bonus,
-            "speed_stream_bonus":  speed_stream_bonus,
-            "miss_penalty_aim":    _miss_penalty(effective_miss_count, difficulty.aim_difficult_strain_count),
-            "miss_penalty_speed":  _miss_penalty(effective_miss_count, difficulty.speed_difficult_strain_count),
-            "n300": float(_n300), "n100": float(_n100),
-            "n50":  float(_n50),  "n_miss": float(_n_miss),
-        },
+        debug=debug,
     )
 
 
